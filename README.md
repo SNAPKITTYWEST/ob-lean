@@ -10,6 +10,9 @@
 [![Emacs](https://img.shields.io/badge/Emacs-27.1%2B-7F5AB6?logo=gnuemacs&logoColor=white)](https://www.gnu.org/software/emacs/)
 [![Lean 4](https://img.shields.io/badge/Lean-4-2F2F2F)](https://lean-lang.org/)
 [![Org mode](https://img.shields.io/badge/Org-babel-77AA99)](https://orgmode.org/worg/org-contrib/babel/)
+<br/>
+[![Patreon](https://img.shields.io/badge/Patreon-f96854?style=flat-square&logo=patreon&logoColor=white)](https://www.patreon.com/0xAX)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat-square&logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/0xAX)
 
 <img src="assets/demo.gif" alt="Lean 4 blocks evaluated in an Org document" width="900">
 
@@ -37,6 +40,7 @@ The following covers details on how to implement Lean source code blocks in Org 
   - [`:prologue` and `:epilogue`](#prologue-and-epilogue)
   - [`:session`](#session)
 - [Errors](#errors)
+- [Interactive editing](#interactive-editing)
 - [Tangling and export](#tangling-and-export)
 - [Customization](#customization)
 - [Contributing](#contributing)
@@ -347,7 +351,7 @@ def base : Nat := 21
 
 #### Clearing a session
 
-Editing or deleting a block does not retract what it already gave the session, and Lean will refuse a definition that arrives twice. Forget the session and re-run:
+Running a block again replaces what it gave the session: it is compiled after the blocks that joined before it, not after its own earlier version. Deleting a block, or renaming it, does not retract what it already gave the session, and Lean will refuse a definition that arrives twice. Forget the session and re-run:
 
 ```
 M-x org-babel-lean4-clear-session RET work RET    ; one session
@@ -389,6 +393,53 @@ Output that is not valid JSON - Lake noise, a compiler panic - is kept verbatim,
 : Lean exited with status 1
 ```
 
+## Interactive editing
+
+`C-c '` edits a block in a buffer that is not visiting a file, and the Lean language server has nothing to work with there: no goals, no infoview, no completion. `M-x org-babel-lean4-edit` opens the block in a real `.lean` file instead, so with `lean4-mode` the server starts and the block can be developed the way any Lean file is:
+
+```org
+#+begin_src lean4 :imports Lean
+theorem mul_zero (a : Nat) : a * 0 = 0 := by
+  skip  -- point here, M-x org-babel-lean4-edit, then C-c C-i for the goals
+#+end_src
+```
+
+What the block is compiled with is written around it, so the server sees it the way running it would: the blocks of its `:session` that ran before it, `:imports`, `:var`, `:prologue` and `:epilogue`. Those lines sit in regions marked as generated, are read-only, and never make it back into the block:
+
+```lean
+-- ob-lean4: generated, not part of the block {{{
+import Lean
+-- ob-lean4: }}}
+theorem mul_zero (a : Nat) : a * 0 = 0 := by
+  skip  -- point here, M-x org-babel-lean4-edit, then C-c C-i for the goals
+```
+
+| Key       | Command                      | Effect                                       |
+|-----------|------------------------------|----------------------------------------------|
+| `C-c '`   | `org-babel-lean4-edit-exit`  | Write the buffer back into the block, return |
+| `C-c C-q` | `org-babel-lean4-edit-abort` | Return without writing anything back         |
+| `C-x C-s` | `org-babel-lean4-edit-save`  | Write the buffer back and save the Org file  |
+
+Abort is not on `C-c C-k`, as it is in an Org src buffer, because `lean4-mode` uses that key to show how to type the symbol at point.
+
+The file is written to `org-babel-lean4-edit-directory`, along with a `lean-toolchain` naming the toolchain `lean` runs, which is what makes the server treat that directory as a project. A block with `:lake yes` is edited inside its project instead, under `.lake/ob-lean4` of its `:dir`, so that the dependencies of the project are importable. The file is deleted when you leave the buffer.
+
+The blocks of a session only exist once they have been run in the current Emacs, so run them before editing a block that needs them.
+
+To have `C-c '` do this for Lean blocks and stay `org-edit-special` everywhere else:
+
+```elisp
+(defun my-org-edit-special ()
+  "Edit Lean blocks with the language server, anything else as usual."
+  (interactive)
+  (if (member (car (org-babel-get-src-block-info 'light)) '("lean4" "lean"))
+      (org-babel-lean4-edit)
+    (call-interactively #'org-edit-special)))
+
+(with-eval-after-load 'org
+  (define-key org-mode-map (kbd "C-c '") #'my-org-edit-special))
+```
+
 ## Tangling and export
 
 `.lean` is registered as the extension for both `lean4` and `lean`:
@@ -419,6 +470,7 @@ The standard export knobs all work as usual:
 | `org-babel-lean4-command-name`        | `"lean"`                                      | The Lean executable                  |
 | `org-babel-lean4-lake-name`           | `"lake"`                                      | The Lake executable, for `:lake yes` |
 | `org-babel-default-header-args:lean4` | `((:results . "output") (:exports . "both"))` | Default header arguments             |
+| `org-babel-lean4-edit-directory`      | `ob-lean4` in `temporary-file-directory`      | Where `org-babel-lean4-edit` works   |
 
 ```elisp
 (setq org-babel-lean4-command-name "lean"
